@@ -1,0 +1,31 @@
+name: Briefing Macro Quotidien
+
+on:
+  schedule:
+    # 7h45 heure française = 5h45 UTC en heure d'été (CEST, ~fin mars à fin oct)
+    - cron: "45 5 * * *"
+    # 7h45 heure française = 6h45 UTC en heure d'hiver (CET, ~fin oct à fin mars)
+    - cron: "45 6 * * *"
+  workflow_dispatch: {}  # permet de lancer le workflow manuellement depuis l'onglet Actions
+
+jobs:
+  send-briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Installation de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installation des dépendances
+        run: pip install yfinance requests
+
+      - name: Envoi du briefing
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+        run: python macro_bot.py
