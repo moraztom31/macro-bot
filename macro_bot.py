@@ -33,6 +33,12 @@ ASSETS = {
     "Taux 10 ans US": ("^TNX", "taux"),
 }
 
+# Tickers de secours utilisés si le ticker principal ne renvoie pas de données
+# (certains tickers, notamment les taux, sont moins fiables sur Yahoo Finance)
+FALLBACK_TICKERS = {
+    "^TNX": ["TNX", "^TYX"],  # ^TYX = taux 30 ans US, utilisé en dernier recours
+}
+
 # Cryptos via CoinGecko (API publique gratuite, pas de clé requise)
 CRYPTOS = {
     "Bitcoin": "bitcoin",
@@ -40,24 +46,50 @@ CRYPTOS = {
 }
 
 
+def _fetch_history(ticker, period="5d"):
+    """Tente de récupérer l'historique d'un ticker. Renvoie le DataFrame ou None."""
+    try:
+        hist = yf.Ticker(ticker).history(period=period)
+        if hist.empty or len(hist) < 2:
+            return None
+        return hist
+    except Exception:
+        return None
+
+
 def fetch_yfinance_data():
     """Récupère prix actuel + variation % pour chaque actif Yahoo Finance.
     Renvoie un dict: nom -> {"prix": float, "pct": float, "categorie": str} ou None si échec.
+    Essaie une fenêtre plus large (1 mois) puis des tickers de secours en cas d'échec.
     """
     results = {}
     for name, (ticker, categorie) in ASSETS.items():
+        hist = _fetch_history(ticker, period="5d")
+        if hist is None:
+            print(f"[WARN] {name} ({ticker}) : échec sur 5d, nouvelle tentative sur 1mo", file=sys.stderr)
+            hist = _fetch_history(ticker, period="1mo")
+
+        used_ticker = ticker
+        if hist is None:
+            for fallback in FALLBACK_TICKERS.get(ticker, []):
+                print(f"[WARN] {name} : tentative avec ticker de secours {fallback}", file=sys.stderr)
+                hist = _fetch_history(fallback, period="1mo")
+                if hist is not None:
+                    used_ticker = fallback
+                    break
+
+        if hist is None:
+            print(f"[WARN] Pas de données pour {name} ({ticker}) même après fallback", file=sys.stderr)
+            results[name] = None
+            continue
+
         try:
-            hist = yf.Ticker(ticker).history(period="5d")
-            if hist.empty or len(hist) < 2:
-                print(f"[WARN] Pas assez de données pour {name} ({ticker})", file=sys.stderr)
-                results[name] = None
-                continue
             last = float(hist["Close"].iloc[-1])
             prev = float(hist["Close"].iloc[-2])
             pct = (last - prev) / prev * 100 if prev else 0.0
             results[name] = {"prix": last, "pct": pct, "categorie": categorie}
         except Exception as e:
-            print(f"[WARN] Échec récupération {name} ({ticker}): {e}", file=sys.stderr)
+            print(f"[WARN] Échec calcul {name} ({used_ticker}): {e}", file=sys.stderr)
             results[name] = None
     return results
 
