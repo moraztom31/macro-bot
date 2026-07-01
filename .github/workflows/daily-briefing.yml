@@ -2,11 +2,20 @@ name: Briefing Macro Quotidien
 
 on:
   schedule:
-    # 7h45 heure française = 5h45 UTC en heure d'été (CEST, ~fin mars à fin oct)
+    # Les crons GitHub gratuits tournent souvent en retard (parfois plusieurs heures).
+    # On multiplie donc les créneaux entre 5h et 8h UTC (7h-10h heure française selon
+    # été/hiver) : le premier run qui tombe dans la fenêtre envoie le briefing,
+    # les suivants sont ignorés grâce au fichier d'état last_sent.txt.
     - cron: "45 5 * * *"
-    # 7h45 heure française = 6h45 UTC en heure d'hiver (CET, ~fin oct à fin mars)
+    - cron: "15 6 * * *"
     - cron: "45 6 * * *"
+    - cron: "15 7 * * *"
+    - cron: "45 7 * * *"
+    - cron: "15 8 * * *"
   workflow_dispatch: {}  # permet de lancer le workflow manuellement depuis l'onglet Actions
+
+permissions:
+  contents: write  # nécessaire pour commiter le fichier d'état last_sent.txt
 
 jobs:
   send-briefing:
@@ -29,3 +38,15 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python macro_bot.py
+
+      - name: Sauvegarde de l'état anti-doublon
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_sent.txt
+          if git diff --cached --quiet; then
+            echo "Pas de changement d'état à sauvegarder."
+          else
+            git commit -m "État: briefing envoyé $(date -u +%Y-%m-%d)"
+            git push
+          fi
