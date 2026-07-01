@@ -248,40 +248,88 @@ def build_message():
 
 
 def send_telegram_message(text):
-    """Envoie le message via l'API Telegram Bot."""
+    """Envoie le message via l'API Telegram Bot à un ou plusieurs destinataires.
+    TELEGRAM_CHAT_ID peut contenir un seul ID, ou plusieurs séparés par des virgules
+    (ex: "123456789,987654321") pour partager le briefing à plusieurs personnes.
+    Si l'envoi échoue pour un destinataire, on continue avec les autres plutôt que
+    de tout arrêter.
+    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
+    raw_chat_ids = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not raw_chat_ids:
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID manquant dans les variables d'environnement."
         )
+    chat_ids = [c.strip() for c in raw_chat_ids.split(",") if c.strip()]
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    resp = requests.post(
-        url,
-        data={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    errors = []
+    for chat_id in chat_ids:
+        try:
+            resp = requests.post(
+                url,
+                data={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            print(f"✅ Message envoyé à {chat_id}")
+        except Exception as e:
+            print(f"[WARN] Échec d'envoi à {chat_id}: {e}", file=sys.stderr)
+            errors.append(chat_id)
+
+    if errors and len(errors) == len(chat_ids):
+        # Tous les envois ont échoué : on considère ça comme une erreur fatale
+        raise RuntimeError(f"Échec d'envoi pour tous les destinataires: {errors}")
+
+
+STATE_FILE = "last_sent.txt"
+
+
+def today_paris():
+    """Renvoie la date du jour (heure de Paris) au format YYYY-MM-DD."""
+    return datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d")
+
+
+def already_sent_today():
+    """Vérifie si un briefing a déjà été envoyé aujourd'hui (fichier d'état)."""
+    try:
+        with open(STATE_FILE, "r") as f:
+            return f.read().strip() == today_paris()
+    except FileNotFoundError:
+        return False
+
+
+def mark_sent_today():
+    """Enregistre la date du jour dans le fichier d'état."""
+    with open(STATE_FILE, "w") as f:
+        f.write(today_paris())
 
 
 def is_right_time_slot():
-    """Le workflow GitHub Actions est programmé sur 2 créneaux UTC (été/hiver)
-    pour viser 7h45 heure française toute l'année. Cette fonction vérifie qu'on
-    est bien dans la bonne fenêtre horaire locale, pour éviter un double envoi.
-    Si lancé manuellement (workflow_dispatch) ou en local, on ignore ce filtre.
+    """Les crons GitHub Actions gratuits peuvent tourner avec beaucoup de retard.
+    On accepte donc une fenêtre large (7h-10h heure de Paris) et on s'appuie sur
+    la déduplication par date (fichier d'état) pour ne jamais envoyer 2 fois.
+    Si lancé manuellement (workflow_dispatch), on ignore ce filtre.
     """
     if os.environ.get("FORCE_SEND") == "1":
         return True
     now_paris = datetime.now(ZoneInfo("Europe/Paris"))
-    return 7 <= now_paris.hour <= 8
+    return 7 <= now_paris.hour <= 10
 
 
 if __name__ == "__main__":
-    if not is_right_time_slot():
-        print("⏭️  Hors créneau horaire cible (anti doublon été/hiver) — envoi annulé.")
+    force = os.environ.get("FORCE_SEND") == "1"
+
+    if not force and already_sent_today():
+        print("⏭️  Briefing déjà envoyé aujourd'hui — envoi annulé (anti doublon).")
         sys.exit(0)
+
+    if not is_right_time_slot():
+        print("⏭️  Hors créneau horaire cible (7h-10h Paris) — envoi annulé.")
+        sys.exit(0)
+
     message = build_message()
     print(message)  # utile pour debug dans les logs GitHub Actions
     send_telegram_message(message)
+    mark_sent_today()
     print("\n✅ Message envoyé avec succès.")
