@@ -1,5 +1,4 @@
 name: Briefing Macro Quotidien
-
 on:
   schedule:
     # Les crons GitHub gratuits tournent souvent en retard (parfois plusieurs heures).
@@ -13,40 +12,38 @@ on:
     - cron: "45 7 * * *"
     - cron: "15 8 * * *"
   workflow_dispatch: {}  # permet de lancer le workflow manuellement depuis l'onglet Actions
-
 permissions:
   contents: write  # nécessaire pour commiter le fichier d'état last_sent.txt
-
 jobs:
   send-briefing:
     runs-on: ubuntu-latest
     steps:
       - name: Récupération du code
         uses: actions/checkout@v4
-
       - name: Installation de Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Installation des dépendances
         run: pip install yfinance requests
-
       - name: Envoi du briefing
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python macro_bot.py
-
       - name: Sauvegarde de l'état anti-doublon
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add last_sent.txt
-          if git diff --cached --quiet; then
-            echo "Pas de changement d'état à sauvegarder."
+          if [ -f last_sent.txt ]; then
+            git add last_sent.txt
+            if git diff --cached --quiet; then
+              echo "Pas de changement d'état à sauvegarder."
+            else
+              git commit -m "État: briefing envoyé $(date -u +%Y-%m-%d)"
+              git push
+            fi
           else
-            git commit -m "État: briefing envoyé $(date -u +%Y-%m-%d)"
-            git push
+            echo "last_sent.txt n'existe pas (aucun envoi effectué) — rien à sauvegarder."
           fi
