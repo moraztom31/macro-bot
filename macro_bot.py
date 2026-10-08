@@ -276,14 +276,30 @@ def readings(data):
     return [t for _, t in out[:6]]
 
 
+# Seuil de mouvement du jour jugé notable même quand la volatilité habituelle de l'actif est élevée
+# (en %, sauf taux en points de pourcentage). Un mouvement égal au seuil compte comme 2 écarts-types.
+ABS_THRESHOLD = {"idx": 1.5, "fut": 1.5, "yield": 0.10, "fx4": 1.0, "fx2": 1.0, "cmd": 3.0, "vix": 10.0, "etf": 1.5, "crypto": 5.0}
+
+
+def move_strength(v):
+    """Force du mouvement du jour : max(|z|, mouvement / seuil absolu x 2)."""
+    st = v["s"]
+    z = abs(st["z"]) if st["z"] is not None else 0
+    return max(z, abs(st["d1"]) / ABS_THRESHOLD.get(v["kind"], 2.0) * 2)
+
+
+def notable_movers(data, threshold=1.8):
+    return sorted(((move_strength(v), n, v) for n, v in data.items() if move_strength(v) >= threshold), key=lambda x: -x[0])
+
+
 def unusual_moves(data, top=5, threshold=1.8):
-    """Les mouvements du jour les plus anormaux par rapport à la volatilité récente de chaque actif."""
-    rows = [(abs(v["s"]["z"]), n, v) for n, v in data.items() if v["s"]["z"] is not None and abs(v["s"]["z"]) >= threshold]
-    rows.sort(key=lambda x: -x[0])
+    """Les mouvements du jour les plus marquants : écart à la volatilité récente (σ) ou ampleur absolue."""
+    rows = notable_movers(data, threshold)
     lines = []
     for _, n, v in rows[:top]:
         st = v["s"]
-        lines.append(f"• <b>{esc(n)}</b> {fmt_chg(v['kind'], st['d1'])} ({num(st['z'], '+.1f')}σ), à {esc(fmt_price(v['kind'], st['last']))}")
+        sigma = f" ({num(st['z'], '+.1f')}σ)" if st["z"] is not None else ""
+        lines.append(f"• <b>{esc(n)}</b> {fmt_chg(v['kind'], st['d1'])}{sigma}, à {esc(fmt_price(v['kind'], st['last']))}")
     return lines
 
 
@@ -383,7 +399,7 @@ THEME_WEIGHT = {"Banques centrales": 3.5, "Taux & obligations": 3, "Inflation & 
 FEED_WEIGHT = {"markets": 3, "economy": 3, "lex": 3, "opinion": 2, "alphaville": 1.5, "companies": 2, "world": 0.5, "home": 1}
 NOISE = re.compile(r"further reading|firstft|newsletter|podcast|crossword|grand prix|recipe|wine|travel|property|restaurant|football|cricket|golf|fashion|obituary|how to spend it|weekend|puzzle", re.I)
 # actif qui bouge fort -> mots qui rendent un article plus pertinent aujourd'hui
-MOVER_TERMS = {"Brent": ["oil", "crude", "opec", "hormuz", "energy"], "WTI": ["oil", "crude", "opec"], "Or": ["gold"], "US 10 ans": ["treasury", "yield", "bond"], "US 30 ans": ["treasury", "yield", "bond"],
+MOVER_TERMS = {"Brent": ["oil", "crude", "opec", "hormuz", "energy", "tanker"], "WTI": ["oil", "crude", "opec", "tanker"], "Or": ["gold"], "US 10 ans": ["treasury", "yield", "bond"], "US 30 ans": ["treasury", "yield", "bond"],
                "Dollar Index": ["dollar"], "EUR/USD": ["euro", "dollar"], "USD/JPY": ["yen", "japan", "boj"], "VIX": ["selloff", "volatility", "stocks"], "Bitcoin": ["bitcoin", "crypto"],
                "Nikkei 225": ["japan", "nikkei", "yen"], "CAC 40": ["france", "french"], "DAX": ["german", "germany"], "Hang Seng": ["china", "hong kong"], "Nasdaq": ["tech", "nvidia", "ai"],
                "Gaz TTF": ["gas", "lng", "energy"], "Cuivre": ["copper", "china"]}
@@ -416,7 +432,7 @@ def score_article(a, boost_terms, now):
     if NOISE.search(a["title"]):
         return -9, None
     score = FEED_WEIGHT.get(a["feed"], 1)
-    themes = [(THEME_WEIGHT[t], t) for t, kws in THEMES.items() if any(k in text for k in kws)]
+    themes = [(THEME_WEIGHT[t] + 0.3 * sum(k in text for k in kws), t) for t, kws in THEMES.items() if any(k in text for k in kws)]
     themes.sort(reverse=True)
     if themes:
         score += themes[0][0] + 0.5 * sum(w for w, _ in themes[1:3])
@@ -433,7 +449,7 @@ def score_article(a, boost_terms, now):
 def ft_sections(articles, data, now=None):
     now = now or datetime.now(timezone.utc)
     boost = []
-    movers = sorted(((abs(v["s"]["z"] or 0), n) for n, v in data.items() if v["s"]["z"] is not None and abs(v["s"]["z"]) >= 1.8), reverse=True)[:4]
+    movers = [(sc, n) for sc, n, _ in notable_movers(data)][:4]
     for _, n in movers:
         boost += MOVER_TERMS.get(n, [])
     scored = []
@@ -504,7 +520,7 @@ def build_sections(now=None, data=None, calendar=None, articles=None):
         head += "\n⚠️ Données de marché indisponibles (Yahoo Finance injoignable)."
     unusual = safe(lambda: unusual_moves(data), [], "mouvements inhabituels") if data else []
     if unusual:
-        head += "\n\n<b>⚡ Mouvements inhabituels</b> <i>(écart vs volatilité des 3 derniers mois)</i>\n" + "\n".join(unusual)
+        head += "\n\n<b>⚡ Mouvements inhabituels</b> <i>(σ = écart vs volatilité des 3 derniers mois)</i>\n" + "\n".join(unusual)
     sections.append(head)
 
     if data:
