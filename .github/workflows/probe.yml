@@ -1,0 +1,19 @@
+name: probe
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/macro-bot-fix"]
+    paths: ["tools/probe/**", ".github/workflows/probe.yml"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install yfinance requests
+      - run: python tools/probe/p1.py 2>&1
