@@ -405,6 +405,12 @@ MOVER_TERMS = {"Brent": ["oil", "crude", "opec", "hormuz", "energy", "tanker"], 
                "Gaz TTF": ["gas", "lng", "energy"], "Cuivre": ["copper", "china"]}
 
 
+# rubrique « deals & banques » : opérations et banques d'affaires/fonds (pas « bank » seul : il attrape « central bank »)
+DEALS_KW = THEMES["Deals & M&A"] + ["private equity", "private credit", "investment bank", "jpmorgan", "goldman", "morgan stanley", "bnp", "societe generale", "société générale",
+                                    "hsbc", "ubs", "barclays", "deutsche bank", "lazard", "rothschild", "blackrock", "apollo", "kkr", "blackstone", "carlyle", "hedge fund",
+                                    "trading desk", "underwriting", "restructuring advis"]
+
+
 def fetch_ft(feeds=FT_FEEDS):
     """-> liste d'articles {title, desc, link, dt, feed} issus des flux RSS publics du FT."""
     items = {}
@@ -429,7 +435,7 @@ def fetch_ft(feeds=FT_FEEDS):
 
 def score_article(a, boost_terms, now):
     text = f" {a['title']} {a['desc']} ".lower()
-    if NOISE.search(a["title"]):
+    if NOISE.search(a["title"]) or re.search(r"newsletter|sign up|unlock the|listen to|watch:", a["desc"], re.I):
         return -9, None
     score = FEED_WEIGHT.get(a["feed"], 1)
     themes = [(THEME_WEIGHT[t] + 0.3 * sum(k in text for k in kws), t) for t, kws in THEMES.items() if any(k in text for k in kws)]
@@ -480,7 +486,7 @@ def ft_sections(articles, data, now=None):
         if a["link"] in used:
             continue
         text = f" {a['title']} {a['desc']} ".lower()
-        if any(k in text for k in THEMES["Deals & M&A"] + THEMES["Banques & crédit"]):
+        if any(k in text for k in DEALS_KW):
             deals.append(item(None, a))
             used.add(a["link"])
         if len(deals) == 2:
