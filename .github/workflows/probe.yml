@@ -16,4 +16,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install yfinance requests
-      - run: python tools/probe/p1.py 2>&1
+      - name: Briefing en mode test (rien envoye)
+        env:
+          DRY_RUN: "1"
+        run: python macro_bot.py 2>&1
