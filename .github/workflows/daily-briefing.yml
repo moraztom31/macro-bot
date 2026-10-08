@@ -1,19 +1,27 @@
 name: Briefing Macro Quotidien
 on:
   schedule:
-    # Les crons GitHub gratuits tournent souvent en retard (parfois plusieurs heures).
-    # On multiplie donc les créneaux entre 5h et 8h UTC (7h-10h heure française selon
-    # été/hiver) : le premier run qui tombe dans la fenêtre envoie le briefing,
-    # les suivants sont ignorés grâce au fichier d'état last_sent.txt.
+    # Les crons GitHub gratuits tournent souvent en retard (parfois 6 à 10 heures).
+    # Le premier passage de la journée après 7h (Paris) envoie le briefing, les suivants
+    # sont ignorés grâce au fichier d'état last_sent.txt. Pour un envoi à heure fixe,
+    # déclencher le workflow depuis cron-job.org (voir README).
     - cron: "45 5 * * *"
     - cron: "15 6 * * *"
     - cron: "45 6 * * *"
     - cron: "15 7 * * *"
     - cron: "45 7 * * *"
     - cron: "15 8 * * *"
-  workflow_dispatch: {}  # permet de lancer le workflow manuellement depuis l'onglet Actions
+  workflow_dispatch:   # lancement manuel depuis l'onglet Actions, ou à heure fixe via un déclencheur externe (voir README)
+    inputs:
+      dry_run:
+        description: "Test : affiche le briefing dans les logs sans l'envoyer"
+        type: boolean
+        default: false
 permissions:
   contents: write  # nécessaire pour commiter le fichier d'état last_sent.txt
+concurrency:
+  group: briefing          # un seul passage à la fois : évite deux envois quand plusieurs crons en retard arrivent ensemble
+  cancel-in-progress: false
 jobs:
   send-briefing:
     runs-on: ubuntu-latest
@@ -30,7 +38,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && '1' || '0' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
         run: python macro_bot.py
       - name: Sauvegarde de l'état anti-doublon
         run: |
