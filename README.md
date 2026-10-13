@@ -1,52 +1,95 @@
-# Bot de briefing macro (Telegram)
+# Macro Bot — briefing macro-financier quotidien
 
-Un briefing envoyé chaque jour ouvré sur Telegram, par GitHub Actions :
+Bot Python qui envoie chaque jour ouvré, avant l'ouverture des marchés européens, un **briefing macro** sur Telegram :
+état des marchés, mouvements inhabituels, agenda économique et sélection d'articles à lire.
+Il tourne entièrement sur **GitHub Actions** (aucun serveur) et n'utilise **aucune API payante**.
 
-- **Tonalité du marché** (risk-on / risk-off) avec les raisons chiffrées
-- **Mouvements inhabituels** : mesurés en écarts-types (σ) par rapport à la volatilité des 3 derniers mois, avec des
-  seuils absolus de secours (matières premières ≥ 3 %, indices ≥ 1,5 %, taux ≥ 10 pb...)
-- **Lecture des marchés** : taux US et courbe 3 mois–10 ans, énergie, dollar, or, tendance des indices (moyenne 200 j,
-  plus haut 52 semaines), VIX en centile, crédit high yield
-- **Tableau** actions, futures, taux, changes, matières premières, volatilité, crypto (1 jour, 1 semaine, 1 mois)
-- **Agenda économique** du jour (heure de Paris) et des 2 jours suivants
-- **FT, à lire aujourd'hui** : les 5 articles les plus utiles parmi les flux RSS publics du Financial Times
-  (titre et résumé, lien direct pour ton abonnement), classés par thème (banques centrales, taux, énergie, géopolitique...)
-  et remontés quand ils expliquent un mouvement du jour. Une rubrique **deals & banques** (2 articles) pour les entretiens.
+## Fonctionnalités
 
-Aucune clé d'API payante. L'analyse est calculée par règles (pas de modèle de langage).
+| Rubrique | Contenu |
+|---|---|
+| **Tonalité du marché** | Score *risk-on / risk-off* transparent, avec les raisons chiffrées qui le justifient |
+| **Mouvements inhabituels** | Variations mesurées en écarts-types (σ) par rapport à la volatilité des 3 derniers mois, avec des seuils absolus de secours par classe d'actifs |
+| **Lecture des marchés** | Taux US et courbe 3 mois–10 ans, énergie, dollar, or, tendance des indices (moyenne 200 j, plus haut 52 semaines), VIX en centile, crédit high yield |
+| **Tableau de bord** | Actions, futures, taux, changes, matières premières, volatilité, crypto (variation 1 jour, 1 semaine, 1 mois) |
+| **Agenda économique** | Publications du jour et des 2 jours suivants, à l'heure de Paris |
+| **Presse financière** | 5 articles classés par thème (banques centrales, taux, énergie, géopolitique…) et remontés quand ils expliquent un mouvement du jour, plus une rubrique deals & banques |
 
-## Pourquoi le bot ne s'envoyait plus depuis fin août
+L'analyse est **calculée par règles** (statistiques et pondérations explicites), sans modèle de langage : chaque conclusion du briefing est traçable.
 
-Les crons gratuits de GitHub Actions arrivent avec 6 à 10 heures de retard. L'ancien garde-fou n'acceptait que 7h-10h
-(Paris) : tous les passages étaient donc ignorés (« Hors créneau horaire cible »), tout en s'affichant en succès.
-Désormais le **premier passage de la journée après 7h (jours ouvrés)** envoie le briefing, quelle que soit l'heure,
-et `last_sent.txt` empêche un second envoi. Samedi et dimanche : rien (`SEND_WEEKENDS` dans `macro_bot.py`).
+## Architecture
 
-## Envoi à heure fixe (recommandé)
+```
+GitHub Actions (cron + déclenchement externe)
+        │
+        ▼
+  macro_bot.py ──► Yahoo Finance (yfinance)      cours et historiques
+              ├──► Flux RSS publics du FT         titres et résumés
+              ├──► Calendrier économique (JSON)   événements macro
+              │
+              ├─ compute_stats()   variations 1j/1s/1m, z-score du jour
+              ├─ regime()          score risk-on / risk-off
+              ├─ readings()        lecture croisée des marchés
+              ├─ score_article()   pertinence des articles
+              ▼
+        Telegram Bot API  (messages découpés sous la limite de 4096 caractères)
+```
 
-Pour recevoir le briefing à 7h30 au lieu de « quand GitHub veut », crée un job sur cron-job.org (gratuit) :
+Choix de conception :
 
-- URL : `https://api.github.com/repos/moraztom31/macro-bot/actions/workflows/daily-briefing.yml/dispatches`
-- Méthode : POST, corps : `{"ref":"main"}`
-- En-têtes : `Authorization: Bearer <PAT>`, `Accept: application/vnd.github+json`, `Content-Type: application/json`
-- Le PAT est un *fine-grained token* limité à ce repo, permission **Actions : Read and write**
-- Horaire : 7h30 Europe/Paris, du lundi au vendredi
+- **Résilience** : chaque rubrique est isolée (`safe()`). Si une source tombe, le reste du briefing part quand même.
+- **Détection par σ** : un mouvement de 1 % n'a pas la même signification sur le Nikkei et sur le VIX. Le z-score compare chaque actif à sa propre volatilité récente.
+- **Anti-doublon** : le fichier `last_sent.txt` mémorise le dernier envoi. Le premier passage de la journée après 7 h (Paris) envoie le briefing et les suivants sont ignorés. Cela absorbe les retards des crons gratuits de GitHub, qui peuvent atteindre plusieurs heures.
+- **Concurrence maîtrisée** : un seul passage à la fois (`concurrency` du workflow), pour éviter les doubles envois.
+- **Pas de week-end** : aucun envoi samedi et dimanche (paramétrable).
 
-Les crons GitHub restent en secours si ce déclencheur échoue.
+## Stack
 
-## Tester
+Python 3.11 · `yfinance` · `requests` · GitHub Actions · Telegram Bot API
 
-- **Onglet Actions > Briefing Macro Quotidien > Run workflow** : coche `dry_run` pour afficher le briefing dans les logs
-  sans l'envoyer ; décoche pour l'envoyer vraiment à Telegram (premier test conseillé pour vérifier le token).
-- En local : `DRY_RUN=1 python macro_bot.py` (nécessite `pip install yfinance requests`).
+## Installation
 
-## Réglages (`macro_bot.py`)
+1. **Fork ou clone** ce dépôt.
+2. Crée un bot avec [@BotFather](https://t.me/BotFather) (`/newbot`) pour obtenir le token, puis récupère ton identifiant de chat en écrivant à ton bot.
+3. Dans **Settings → Secrets and variables → Actions**, ajoute :
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_CHAT_ID` (plusieurs identifiants possibles, séparés par des virgules)
+4. Le workflow `Briefing Macro Quotidien` se déclenche automatiquement les jours ouvrés.
 
-- `GROUPS` : actifs suivis (nom, ticker Yahoo, format)
+### Test en local
+
+```bash
+pip install -r requirements.txt
+DRY_RUN=1 python macro_bot.py      # affiche le briefing sans l'envoyer
+```
+
+### Test sur GitHub
+
+**Actions → Briefing Macro Quotidien → Run workflow**. Coche `dry_run` pour afficher le briefing dans les logs sans l'envoyer.
+
+### Envoi à heure fixe (optionnel)
+
+Pour recevoir le briefing à 7 h 30 précises, déclenche le workflow depuis un service de cron externe (par exemple cron-job.org) :
+
+- `POST https://api.github.com/repos/<ton-compte>/macro-bot/actions/workflows/daily-briefing.yml/dispatches`
+- Corps : `{"ref":"main"}`
+- En-tête `Authorization: Bearer <PAT>`, avec un *fine-grained token* limité à ce dépôt (permission **Actions : Read and write**)
+
+Les crons GitHub restent actifs en secours.
+
+## Configuration
+
+Tout se règle en haut de `macro_bot.py` :
+
+- `GROUPS` : actifs suivis (nom, ticker Yahoo, format d'affichage)
 - `SEND_FROM_HOUR`, `SEND_UNTIL_HOUR`, `SEND_WEEKENDS` : fenêtre d'envoi
-- `THEMES`, `THEME_WEIGHT`, `FEED_WEIGHT`, `NOISE` : ce qui rend un article FT intéressant ou non
-- `TELEGRAM_CHAT_ID` peut contenir plusieurs identifiants séparés par des virgules
+- `ABS_THRESHOLD` : seuils absolus par classe d'actifs
+- `THEMES`, `THEME_WEIGHT`, `FEED_WEIGHT`, `NOISE` : critères de sélection des articles
 
-## Secrets requis
+## Sécurité
 
-`TELEGRAM_BOT_TOKEN` et `TELEGRAM_CHAT_ID` (Settings > Secrets and variables > Actions).
+Aucun secret n'est stocké dans le code : les identifiants Telegram sont fournis par les GitHub Secrets.
+
+## Avertissement
+
+Projet personnel à visée informative. Il ne constitue pas un conseil en investissement. Les données proviennent de sources publiques et peuvent être retardées ou incomplètes.
