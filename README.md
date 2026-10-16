@@ -4,6 +4,16 @@ Bot Python qui envoie chaque jour ouvré, avant l'ouverture des marchés europé
 état des marchés, mouvements inhabituels, agenda économique et sélection d'articles à lire.
 Il tourne entièrement sur **GitHub Actions** (aucun serveur) et n'utilise **aucune API payante**.
 
+## Exemple de briefing
+
+Message réellement reçu sur Telegram le vendredi 16 octobre 2026.
+
+<p align="center"><img src="docs/demo.gif" alt="Démo du briefing sur Telegram" width="260"></p>
+
+| Tonalité, mouvements inhabituels, lecture des marchés, actions, taux, changes | Matières premières, volatilité, crypto, agenda, presse FT |
+|---|---|
+| ![Briefing, partie 1](docs/briefing-1.webp) | ![Briefing, partie 2](docs/briefing-2.webp) |
+
 ## Fonctionnalités
 
 | Rubrique | Contenu |
